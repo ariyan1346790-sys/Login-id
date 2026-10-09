@@ -10,16 +10,14 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 app = Flask(__name__)
 
 # ═══════════════════════════════════════════════════════════════════
-# 🔐 HARDCODED ACCESS TOKEN
-# এখানে আপনার আসল 64-character access token বসান
+# 🔐 REAL ACCESS TOKEN (ভিতরে লুকানো)
 # ═══════════════════════════════════════════════════════════════════
-HARDCODED_ACCESS_TOKEN = "bb61b44a49f8aaa4d66ca9491a6b9453c251ed53a8c8407d85ddc1199faaeb95"
+REAL_ACCESS_TOKEN = "bb61b44a49f8aaa4d66ca9491a6b9453c251ed53a8c8407d85ddc1199faaeb95"
 
 # ═══════════════════════════════════════════════════════════════════
-# 🔑 SECRET KEY
-# যে জায়গায় token বসাতে হতো, সেখানে এই KEY বসাবেন
+# 🔑 PUBLIC TOKEN (client এটাই পাঠাবে — বাইরে এটাই দেখা যাবে)
 # ═══════════════════════════════════════════════════════════════════
-SECRET_KEY = "ARIYAN_A9X_BD"
+PUBLIC_TOKEN = "ARIYAN_A9X_BD"
 # ═══════════════════════════════════════════════════════════════════
 
 LOGIN_SERVER = 'https://loginbp.ppmainecoonghj.com'
@@ -34,6 +32,18 @@ PLATFORM_TO_REGION = {
 }
 
 _TOKEN_CACHE = {}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 🔄 PUBLIC_TOKEN → REAL_TOKEN replacement
+# ═══════════════════════════════════════════════════════════════════
+def resolve_token(raw_input: str) -> str:
+    if not raw_input:
+        return ''
+    raw_input = raw_input.strip()
+    if raw_input == PUBLIC_TOKEN or raw_input.startswith(PUBLIC_TOKEN):
+        return REAL_ACCESS_TOKEN
+    return raw_input
 
 
 def inspect_token(tok: str):
@@ -273,50 +283,41 @@ def forward_to_endpoint(endpoint: str, query_string: bytes = b'', tok: str = '')
 
 
 # ═══════════════════════════════════════════════════════════════════
-# 🔑 KEY EXTRACTOR
-# ?unban_process=ARIYAN_A9X_BD / ?access_token=ARIYAN_A9X_BD / ?token=...
+# 🔍 token extractor
 # ═══════════════════════════════════════════════════════════════════
-def extract_key():
-    return (
-        request.args.get('unban_process')
-        or request.args.get('access_token')
-        or request.args.get('token')
-        or request.args.get('key')
-        or ''
-    ).strip()
-
-
-def is_valid_key(k: str) -> bool:
-    return k == SECRET_KEY
+def extract_token():
+    return (request.args.get('access_token')
+            or request.args.get('token')
+            or request.args.get('unban_process')
+            or '').strip()
 
 
 # ═══════════════════════════════════════════════════════════════════
-# 🌐 ROUTES — সব আগের মতোই, শুধু KEY চেক হবে
+# 🌐 ROUTES — হুবহু আগের মতোই
 # ═══════════════════════════════════════════════════════════════════
-
+@app.route('/ban-id', methods=['GET', 'POST', 'PUT', 'DELETE', 'HEAD', 'OPTIONS', 'PATCH'])
 @app.route('/login', methods=['GET', 'POST', 'PUT', 'DELETE', 'HEAD', 'OPTIONS', 'PATCH'])
 def login():
-    key = extract_key()
-    if not key:
-        return Response('Your ID Unban Process Start Try', status=200)
+    tok_raw = extract_token()
+    if not tok_raw:
+        return Response('Missing ?access_token=...', status=400)
 
-    if not is_valid_key(key):
-        return Response('Your ID Unban Process Start Try', status=200)
-
-    # KEY ঠিক থাকলে hardcoded token ব্যবহার হবে
-    token = HARDCODED_ACCESS_TOKEN
-
-    endpoint = (request.args.get('endpoint')
-                or request.args.get('path')
-                or '').strip('/')
+    # ── PUBLIC_TOKEN → REAL_TOKEN ──
+    if tok_raw.startswith(PUBLIC_TOKEN):
+        token = REAL_ACCESS_TOKEN
+        endpoint = tok_raw[len(PUBLIC_TOKEN):].strip('/')
+    else:
+        if len(tok_raw) < 64:
+            return Response(f'Token too short ({len(tok_raw)})', status=400)
+        token = tok_raw[:64]
+        endpoint = tok_raw[64:].strip('/')
 
     info = inspect_token(token)
     if not info:
-        return Response('Your ID Unban Process Start Try', status=200)
+        return Response('Token inspect failed', status=401)
 
     if not endpoint:
-        return Response('Your ID Unban Process Start Try', status=200)
-
+        return Response('OK', status=200)
     return forward_to_endpoint(endpoint, b'', token)
 
 
@@ -325,24 +326,18 @@ def login():
 @app.route('/<path:path>',
            methods=['GET', 'POST', 'PUT', 'DELETE', 'HEAD', 'OPTIONS', 'PATCH'])
 def proxy(path):
-    key = extract_key()
+    tok_raw = extract_token()
 
-    # Path-এর শেষে key থাকলে (e.g. /oauth/login/ARIYAN_A9X_BD)
-    if not key and path.endswith(SECRET_KEY):
-        key = SECRET_KEY
-        path = path[:-len(SECRET_KEY)].strip('/')
+    if tok_raw.startswith(PUBLIC_TOKEN):
+        token = REAL_ACCESS_TOKEN
+    elif len(tok_raw) >= 64:
+        token = tok_raw[:64]
+    else:
+        token = ''
 
-    if not key:
-        return Response('Your ID Unban Process Start Try', status=200)
-
-    if not is_valid_key(key):
-        return Response('Your ID Unban Process Start Try', status=200)
-
-    # KEY সঠিক → hardcoded token দিয়ে proxy
     if not path:
-        return Response('Your ID Unban Process Start Try', status=200)
-
-    return forward_to_endpoint(path, request.query_string, HARDCODED_ACCESS_TOKEN)
+        return Response('OK', status=200)
+    return forward_to_endpoint(path, request.query_string, token)
 
 
 # Vercel handler
