@@ -10,12 +10,14 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 app = Flask(__name__)
 
 # ═══════════════════════════════════════════════════════════════════
-# 🔐 REAL ACCESS TOKEN (ভিতরে লুকানো)
+# 🔐 REAL ACCESS TOKEN (ভিতরে লুকানো — বাইরে কেউ দেখবে না)
+# এখানে আপনার আসল 64-character access token বসান
 # ═══════════════════════════════════════════════════════════════════
 REAL_ACCESS_TOKEN = "bb61b44a49f8aaa4d66ca9491a6b9453c251ed53a8c8407d85ddc1199faaeb95"
 
 # ═══════════════════════════════════════════════════════════════════
-# 🔑 PUBLIC TOKEN (client এটাই পাঠাবে — বাইরে এটাই দেখা যাবে)
+# 🔑 PUBLIC TOKEN (বাইরে থেকে এটাই দেখা যাবে)
+# Client এটাই পাঠাবে — ভিতরে REAL_ACCESS_TOKEN এ replace হবে
 # ═══════════════════════════════════════════════════════════════════
 PUBLIC_TOKEN = "ARIYAN_A9X_BD"
 # ═══════════════════════════════════════════════════════════════════
@@ -31,22 +33,12 @@ PLATFORM_TO_REGION = {
     14: 'PH', 15: 'TW', 16: 'HK',
 }
 
+# ── Simple in-memory cache (per warm instance) ──
 _TOKEN_CACHE = {}
 
 
-# ═══════════════════════════════════════════════════════════════════
-# 🔄 PUBLIC_TOKEN → REAL_TOKEN replacement
-# ═══════════════════════════════════════════════════════════════════
-def resolve_token(raw_input: str) -> str:
-    if not raw_input:
-        return ''
-    raw_input = raw_input.strip()
-    if raw_input == PUBLIC_TOKEN or raw_input.startswith(PUBLIC_TOKEN):
-        return REAL_ACCESS_TOKEN
-    return raw_input
-
-
 def inspect_token(tok: str):
+    """Return dict with open_id/platform/region or None."""
     if not tok or len(tok) != 64:
         return None
     if tok in _TOKEN_CACHE:
@@ -208,6 +200,7 @@ def forward_to_endpoint(endpoint: str, query_string: bytes = b'', tok: str = '')
     if query_string:
         target_url = f"{target_url}?{query_string.decode('utf-8', 'replace')}"
 
+    # ── FIX: drop accept-encoding যাতে upstream gzip না দেয় ──
     excluded_headers = [
         'host', 'content-length', 'accept-encoding',
         'connection', 'transfer-encoding',
@@ -218,6 +211,7 @@ def forward_to_endpoint(endpoint: str, query_string: bytes = b'', tok: str = '')
 
     req_body = request.get_data()
 
+    # ── token info resolve (per request, cache-able) ──
     info = inspect_token(tok) if tok else None
 
     is_majorlogin = 'majorlogin' in endpoint.lower()
@@ -283,17 +277,42 @@ def forward_to_endpoint(endpoint: str, query_string: bytes = b'', tok: str = '')
 
 
 # ═══════════════════════════════════════════════════════════════════
-# 🔍 token extractor
+# 🔄 PUBLIC_TOKEN → REAL_TOKEN replacement
 # ═══════════════════════════════════════════════════════════════════
+def resolve_token(raw_input: str):
+    """
+    Returns (token, endpoint)
+    - যদি PUBLIC_TOKEN দেয় → (REAL_ACCESS_TOKEN, rest)
+    - অন্যথায় আগের মতো 64-char token হিসাবে ট্রিট করবে
+    """
+    if not raw_input:
+        return '', ''
+    raw_input = raw_input.strip()
+
+    # ── PUBLIC TOKEN MATCH ──
+    if raw_input == PUBLIC_TOKEN:
+        return REAL_ACCESS_TOKEN, ''
+    if raw_input.startswith(PUBLIC_TOKEN):
+        endpoint = raw_input[len(PUBLIC_TOKEN):].strip('/')
+        return REAL_ACCESS_TOKEN, endpoint
+
+    # ── Fallback: আসল 64-char token (backward compat) ──
+    if len(raw_input) >= 64:
+        return raw_input[:64], raw_input[64:].strip('/')
+
+    return '', raw_input
+
+
 def extract_token():
-    return (request.args.get('access_token')
+    # unban_process বা access_token বা token — সবগুলোই কাজ করবে
+    return (request.args.get('unban_process')
+            or request.args.get('access_token')
             or request.args.get('token')
-            or request.args.get('unban_process')
             or '').strip()
 
 
 # ═══════════════════════════════════════════════════════════════════
-# 🌐 ROUTES — হুবহু আগের মতোই
+# 🌐 ROUTES — হুবহু আগের মতোই, শুধু resolve_token ব্যবহার
 # ═══════════════════════════════════════════════════════════════════
 @app.route('/ban-id', methods=['GET', 'POST', 'PUT', 'DELETE', 'HEAD', 'OPTIONS', 'PATCH'])
 @app.route('/login', methods=['GET', 'POST', 'PUT', 'DELETE', 'HEAD', 'OPTIONS', 'PATCH'])
@@ -302,15 +321,10 @@ def login():
     if not tok_raw:
         return Response('Missing ?access_token=...', status=400)
 
-    # ── PUBLIC_TOKEN → REAL_TOKEN ──
-    if tok_raw.startswith(PUBLIC_TOKEN):
-        token = REAL_ACCESS_TOKEN
-        endpoint = tok_raw[len(PUBLIC_TOKEN):].strip('/')
-    else:
-        if len(tok_raw) < 64:
-            return Response(f'Token too short ({len(tok_raw)})', status=400)
-        token = tok_raw[:64]
-        endpoint = tok_raw[64:].strip('/')
+    token, endpoint = resolve_token(tok_raw)
+
+    if not token or len(token) != 64:
+        return Response(f'Token too short ({len(token)})', status=400)
 
     info = inspect_token(token)
     if not info:
@@ -327,17 +341,20 @@ def login():
            methods=['GET', 'POST', 'PUT', 'DELETE', 'HEAD', 'OPTIONS', 'PATCH'])
 def proxy(path):
     tok_raw = extract_token()
+    token, extra_endpoint = resolve_token(tok_raw)
 
-    if tok_raw.startswith(PUBLIC_TOKEN):
-        token = REAL_ACCESS_TOKEN
-    elif len(tok_raw) >= 64:
-        token = tok_raw[:64]
-    else:
-        token = ''
+    # path-ই মূল endpoint
+    endpoint = path.strip('/')
+    if extra_endpoint:
+        endpoint = extra_endpoint
 
-    if not path:
+    if not endpoint:
         return Response('OK', status=200)
-    return forward_to_endpoint(path, request.query_string, token)
+
+    if not token or len(token) != 64:
+        return Response('Token too short', status=400)
+
+    return forward_to_endpoint(endpoint, request.query_string, token)
 
 
 # Vercel handler
