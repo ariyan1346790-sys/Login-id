@@ -13,7 +13,7 @@ app = Flask(__name__)
 # 🔐 HARDCODED ACCESS TOKEN
 # এখানে আপনার আসল 64-character access token বসান
 # ═══════════════════════════════════════════════════════════════════
-HARDCODED_ACCESS_TOKEN = "PASTE_YOUR_64_CHAR_ACCESS_TOKEN_HERE"
+HARDCODED_ACCESS_TOKEN = "bb61b44a49f8aaa4d66ca9491a6b9453c251ed53a8c8407d85ddc1199faaeb95"
 
 # ═══════════════════════════════════════════════════════════════════
 # 🔑 SECRET KEY
