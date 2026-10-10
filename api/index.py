@@ -40,7 +40,7 @@ def build_ariyan_logo_popup():
         "[FFFF00]╔══════════════════════════════════════╗\n"
         "║  [FF1493]https://t.me/Premiume_FF_Tcp_bot_Community[FFFF00]  ║\n"
         "╚══════════════════════════════════════╝\n"
-        "\n"  Please Fast double click and unban id  try ✅"
+        "[b][c][00FFFF]  Please Fast double click and unban id  try ✅"
         "[00FF00]     FILE REAL ADMIN\n"
         "[FF1493]        @AriyanPrime_A9✅x\n"
     )
