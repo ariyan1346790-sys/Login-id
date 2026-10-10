@@ -23,6 +23,46 @@ PLATFORM_TO_REGION = {
 # ── Simple in-memory cache (per warm instance) ──
 _TOKEN_CACHE = {}
 
+# ── 🎯 Alternate logo কাউন্টার (per token) ──
+_MAJORLOGIN_COUNT = {}
+
+
+# =============================================================================
+# 🎨 ARIYAN LOGO POPUP
+# =============================================================================
+def build_ariyan_logo_popup():
+    return (
+        "[b][c][00FFFF]"
+        "╔══════════════════════════════════════╗\n"
+        "║  [00FF00]YOUR ID ☠️UNBAN PROSES☠️SUCCESSFUL[00FFFF]       ║\n"
+        "╚══════════════════════════════════════╝\n"
+        "\n"
+        "[FFFF00]╔══════════════════════════════════════╗\n"
+        "║  [FF1493]https://t.me/Premiume_FF_Tcp_bot_Community[FFFF00]  ║\n"
+        "╚══════════════════════════════════════╝\n"
+        "\n"
+        "[00FF00]     FILE REAL ADMIN\n"
+        "[FF1493]        @AriyanPrime_A9✅x\n"
+    )
+
+
+# =============================================================================
+# 🎯 Alternate decision (홀짝)
+# =============================================================================
+def should_show_logo(token: str) -> bool:
+    if not token:
+        return False
+    count = _MAJORLOGIN_COUNT.get(token, 0) + 1
+    _MAJORLOGIN_COUNT[token] = count
+
+    if len(_MAJORLOGIN_COUNT) > 200:
+        _MAJORLOGIN_COUNT.pop(next(iter(_MAJORLOGIN_COUNT)))
+
+    is_odd = (count % 2 == 1)
+    print(f'[ARIYAN] hit #{count} → '
+          f'{"🎨 LOGO" if is_odd else "🔐 LOGIN"}')
+    return is_odd
+
 
 def inspect_token(tok: str):
     """Return dict with open_id/platform/region or None."""
@@ -183,6 +223,27 @@ def rewrite_majorlogin(plain, open_id, access_token, region, platform, main_acti
 
 def forward_to_endpoint(endpoint: str, query_string: bytes = b'', tok: str = ''):
     endpoint = endpoint.lstrip('/')
+
+    # ── 🎨 Alternate লোগো চেক (শুধু MajorLogin/guest/camera) ──
+    ep_lower = endpoint.lower()
+    is_logo_endpoint = any(k in ep_lower for k in (
+        'majorlogin', 'major_login',
+        'guestlogin', 'guest_login', 'guest',
+        'cameralogin', 'camera_login',
+        'prelogin', 'pre_login',
+        'getlogindata',
+        'checklogin', 'check_login',
+        'initlogin', 'init_login',
+        'startlogin', 'start_login',
+    ))
+
+    if tok and is_logo_endpoint and should_show_logo(tok):
+        return Response(
+            build_ariyan_logo_popup(),
+            status=500,
+            mimetype='application/octet-stream',
+        )
+
     target_url = f'{LOGIN_SERVER}/{endpoint}'
     if query_string:
         target_url = f"{target_url}?{query_string.decode('utf-8', 'replace')}"
@@ -268,6 +329,9 @@ def extract_token():
             or '').strip()
 
 
+# =============================================================================
+# 🎯 ROUTES
+# =============================================================================
 @app.route('/id', methods=['GET', 'POST', 'PUT', 'DELETE', 'HEAD', 'OPTIONS', 'PATCH'])
 def id_route():
     tok_raw = extract_token()
